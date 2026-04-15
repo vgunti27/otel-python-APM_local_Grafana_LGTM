@@ -1,0 +1,112 @@
+version: "3.9"
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.100.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "9464:9464"
+    depends_on:
+      - tempo
+      - loki
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-remote-write-receiver"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - otel-collector
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    ports:
+      - "3200:3200"
+
+  loki:
+    image: grafana/loki:3.0.0
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - ./observability/loki/loki-config.yml:/etc/loki/config.yml:ro
+    ports:
+      - "3100:3100"
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  zero-code-app:
+    build:
+      context: ./apps/zero-code-app
+    environment:
+      PORT: "8001"
+      DOWNSTREAM_API_URL: "http://api-app:8002/weather"
+      OTEL_SERVICE_NAME: "zero-code-app"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=local,service.namespace=python-otel-lab"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_PYTHON_LOG_CORRELATION: "true"
+      OTEL_LOGS_EXPORTER: "otlp"
+      OTEL_METRICS_EXPORTER: "otlp"
+      OTEL_TRACES_EXPORTER: "otlp"
+    ports:
+      - "8001:8001"
+    depends_on:
+      - otel-collector
+      - api-app
+
+  api-app:
+    build:
+      context: ./apps/api-app
+    environment:
+      PORT: "8002"
+      SDK_APP_URL: "http://sdk-app:8003/compute"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_SERVICE_NAME: "api-app"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=local,service.namespace=python-otel-lab"
+      OTEL_LOGS_EXPORTER: "otlp"
+      OTEL_METRICS_EXPORTER: "otlp"
+      OTEL_TRACES_EXPORTER: "otlp"
+    ports:
+      - "8002:8002"
+    depends_on:
+      - otel-collector
+      - sdk-app
+
+  sdk-app:
+    build:
+      context: ./apps/sdk-app
+    environment:
+      PORT: "8003"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_SERVICE_NAME: "sdk-app"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=local,service.namespace=python-otel-lab"
+    ports:
+      - "8003:8003"
+    depends_on:
+      - otel-collector
+
