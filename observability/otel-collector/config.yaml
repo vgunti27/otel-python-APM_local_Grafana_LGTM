@@ -15,10 +15,8 @@ processors:
         action: upsert
 
 exporters:
-  otlp/tempo:
-    endpoint: tempo:4317
-    tls:
-      insecure: true
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
   prometheus:
     endpoint: 0.0.0.0:9464
   otlphttp/loki:
@@ -31,7 +29,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [resource, batch]
-      exporters: [otlp/tempo, debug]
+      exporters: [otlphttp/tempo, debug]
     metrics:
       receivers: [otlp]
       processors: [resource, batch]

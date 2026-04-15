@@ -10,6 +10,10 @@ distributor:
         http:
           endpoint: 0.0.0.0:4318
 
+ingester:
+  trace_idle_period: 2s
+  max_block_duration: 5m
+
 storage:
   trace:
     backend: local
@@ -25,4 +29,3 @@ compactor:
 querier:
   frontend_worker:
     frontend_address: 127.0.0.1:9095
-

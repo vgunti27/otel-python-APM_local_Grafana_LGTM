@@ -14,6 +14,7 @@ flowchart LR
     C --> T[Tempo]
     C --> P[Prometheus scrape endpoint]
     C --> L[Loki]
+    PT[Promtail\nDocker log scraper] --> L
     G[Grafana] --> T
     G --> P
     G --> L
@@ -31,6 +32,7 @@ sequenceDiagram
     participant T as Tempo
     participant P as Prometheus
     participant L as Loki
+    participant PT as Promtail
 
     Client->>Z: GET /work?user_id=42
     Z->>A: GET /weather?city=chicago&user_id=42
@@ -44,6 +46,7 @@ sequenceDiagram
     C->>T: traces
     C->>P: Prometheus scrape target
     C->>L: logs
+    PT->>L: container stdout/stderr logs
 ```
 
 ## Design Notes
@@ -52,4 +55,4 @@ sequenceDiagram
 - The API service adds business spans to improve trace readability.
 - The SDK service demonstrates precise control over metrics, logs, and trace export.
 - Grafana data sources are provisioned at startup, so no manual setup is required.
-
+- Promtail collects Docker container stdout/stderr and ships those logs to Loki.
