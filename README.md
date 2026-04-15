@@ -13,13 +13,14 @@ It also includes a local observability stack with Docker Compose:
 - Tempo
 - Prometheus
 - Loki
+- Promtail
 
 ## Layout
 
 - `apps/zero-code-app`: Plain Flask app with no OpenTelemetry code
 - `apps/api-app`: Flask app with OTEL API manual spans and log correlation hooks
 - `apps/sdk-app`: Flask app with explicit OTEL SDK configuration for traces, metrics, and logs
-- `observability/`: Collector, Grafana, Prometheus, Tempo, and Loki configuration
+- `observability/`: Collector, Grafana, Prometheus, Tempo, Loki, and Promtail configuration
 - `docs/`: Architecture and failure-case documentation
 - `scripts/`: Validation helpers
 
@@ -34,6 +35,14 @@ Start the stack:
 
 ```bash
 docker compose up --build -d
+```
+
+If the running containers do not reflect the latest local source changes, rebuild without cache and force recreation:
+
+```bash
+docker compose down --remove-orphans
+docker compose build --no-cache zero-code-app api-app sdk-app
+docker compose up -d --force-recreate zero-code-app api-app sdk-app otel-collector tempo loki promtail grafana prometheus
 ```
 
 ## Run The Python Apps Without Docker
@@ -129,6 +138,7 @@ Services:
 - Prometheus: `http://localhost:9090`
 - Tempo: `http://localhost:3200`
 - Loki: `http://localhost:3100`
+- Promtail: internal-only log shipper for Docker container stdout/stderr
 
 Grafana credentials:
 
@@ -163,7 +173,9 @@ Generate traffic:
 ```bash
 curl -s http://localhost:8001/health
 curl -s "http://localhost:8001/work?user_id=42"
+curl -s http://localhost:8002/
 curl -s "http://localhost:8002/weather?city=chicago"
+curl -s http://localhost:8003/
 curl -s "http://localhost:8003/compute?items=3,5,8"
 ```
 
@@ -184,6 +196,44 @@ curl -s http://localhost:3200/ready
    - inspect traces in Tempo
    - inspect logs in Loki
    - inspect metrics in Prometheus
+
+## Trace Verification
+
+Do not use Flask startup logs or `werkzeug` access logs as the primary signal for tracing. Those lines may legitimately show `trace_id=0` outside an active request span.
+
+Instead, verify tracing with real request endpoints and response payloads:
+
+```bash
+curl -s "http://localhost:8001/work?user_id=42" | jq
+curl -s "http://localhost:8002/weather?city=chicago&user_id=42" | jq
+curl -s "http://localhost:8003/compute?items=3,5,8" | jq
+```
+
+Each response should include:
+
+- `telemetry.trace_id`
+- `telemetry.span_id`
+
+The `trace_id` should be a 32-character hex string. The same trace should propagate end to end across the nested service calls.
+
+Useful runtime checks:
+
+```bash
+docker compose logs --tail=100 zero-code-app
+docker compose logs --tail=100 api-app
+docker compose logs --tail=100 sdk-app
+docker compose logs --tail=200 otel-collector
+docker compose logs --tail=200 tempo
+docker compose logs --tail=200 promtail
+```
+
+If you suspect stale containers, verify that the updated source is present inside the container:
+
+```bash
+docker compose exec zero-code-app sh -lc "grep -n 'trace_context_payload' /app/app.py"
+docker compose exec api-app sh -lc "grep -n 'trace_context_payload' /app/app.py"
+docker compose exec sdk-app sh -lc "grep -n 'trace_context_payload' /app/app.py"
+```
 
 ## Data Sources Provisioned Automatically
 

@@ -17,6 +17,34 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 
+class TraceContextFilter(logging.Filter):
+    def filter(self, record):
+        span_context = trace.get_current_span().get_span_context()
+        if span_context.is_valid:
+            record.trace_id = f"{span_context.trace_id:032x}"
+            record.span_id = f"{span_context.span_id:016x}"
+        else:
+            record.trace_id = "-"
+            record.span_id = "-"
+        return True
+
+
+def configure_logging(logger_provider):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s service=sdk-app trace_id=%(trace_id)s span_id=%(span_id)s %(name)s %(message)s",
+        force=True,
+    )
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(TraceContextFilter())
+
+    logging_handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
+    logging_handler.addFilter(TraceContextFilter())
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(logging_handler)
+
+
 def build_resource():
     return Resource.create(
         {
@@ -33,7 +61,10 @@ def configure_telemetry(app):
 
     tracer_provider = TracerProvider(resource=resource)
     tracer_provider.add_span_processor(
-        BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces"))
+        BatchSpanProcessor(
+            OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces"),
+            schedule_delay_millis=1000,
+        )
     )
     trace.set_tracer_provider(tracer_provider)
 
@@ -48,17 +79,12 @@ def configure_telemetry(app):
         BatchLogRecordProcessor(OTLPLogExporter(endpoint=f"{endpoint}/v1/logs"))
     )
     set_logger_provider(logger_provider)
-
-    logging_handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    root_logger.addHandler(logging_handler)
+    configure_logging(logger_provider)
 
     FlaskInstrumentor().instrument_app(app)
-    LoggingInstrumentor().instrument(set_logging_format=True)
+    LoggingInstrumentor().instrument(set_logging_format=False)
 
     return {
         "tracer": trace.get_tracer("sdk-app"),
         "meter": metrics.get_meter("sdk-app"),
     }
-

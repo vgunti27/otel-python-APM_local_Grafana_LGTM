@@ -19,6 +19,26 @@ Mitigation:
 - restore the collector
 - keep BatchSpanProcessor defaults or increase queue sizes if outage is brief
 
+## Stale Container Images
+
+Symptoms:
+
+- container behavior does not match the latest source code
+- newly added endpoints still return `404`
+- updated logging changes do not appear after restart
+
+What to check:
+
+- `docker compose exec zero-code-app sh -lc "grep -n 'trace_context_payload' /app/app.py"`
+- `docker compose exec api-app sh -lc "grep -n 'trace_context_payload' /app/app.py"`
+- `docker compose exec sdk-app sh -lc "grep -n 'trace_context_payload' /app/app.py"`
+
+Mitigation:
+
+- `docker compose down --remove-orphans`
+- `docker compose build --no-cache zero-code-app api-app sdk-app`
+- `docker compose up -d --force-recreate zero-code-app api-app sdk-app otel-collector tempo loki promtail grafana prometheus`
+
 ## Tempo Unavailable
 
 Symptoms:
@@ -52,6 +72,25 @@ Mitigation:
 
 - restart Loki
 - verify the collector logs exporter endpoint is `http://loki:3100/otlp`
+
+## Promtail Not Shipping Docker Logs
+
+Symptoms:
+
+- application OTLP logs may appear, but container stdout/stderr logs are missing from Loki
+- Grafana Explore shows incomplete log coverage for the running containers
+
+What to check:
+
+- `docker compose logs promtail`
+- `docker compose ps promtail`
+- ensure `/var/lib/docker/containers` is mounted into Promtail
+
+Mitigation:
+
+- restart `promtail`
+- verify [observability/promtail/config.yml](/home/vgunti/chatgpt/otel-python-projects/observability/promtail/config.yml)
+- verify Docker JSON log files exist on the host
 
 ## Prometheus Missing Metrics
 
@@ -88,6 +127,24 @@ Mitigation:
 - rebuild the zero-code image
 - run `docker compose up --build zero-code-app`
 
+## Trace IDs Missing In Startup Logs
+
+Symptoms:
+
+- startup logs show `trace_id=0` and `span_id=0`
+- operators assume tracing is broken
+
+What to check:
+
+- whether you are reading startup/access logs instead of request-handler logs
+- whether `/work`, `/weather`, and `/compute` responses include `telemetry.trace_id`
+
+Mitigation:
+
+- do not use startup logs alone as trace proof
+- generate traced requests
+- validate trace propagation from response payloads and Tempo
+
 ## Bad OTLP Endpoint
 
 Symptoms:
@@ -115,4 +172,3 @@ Mitigation:
 
 - install Docker Engine and Docker Compose plugin on the host
 - then run `docker compose up --build -d`
-
